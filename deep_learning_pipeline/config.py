@@ -5,7 +5,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 config = OmegaConf.create({
     "general": {
-            "experiment_name": "baseline",
+            "experiment_name": "mlp_baseline",
             "seed": 42,
     },
 
@@ -13,14 +13,16 @@ config = OmegaConf.create({
         "train_data": str(PROJECT_ROOT / "data" / "train.csv"),
         "test_data": str(PROJECT_ROOT / "data" / "test.csv"),
         "checkpoints": str(PROJECT_ROOT / "checkpoints"),
+        "submissions": str(PROJECT_ROOT / "submissions"),
     },
 
     "data": {
         "target": "SalePrice",
         "id_column": "Id",
-        "validation_size": 0.2,
         "target_transform": "log1p",
+        "standardize_target": True,
         "drop_outliers": True,
+        "n_splits": 5,
     },
 
     "model": {

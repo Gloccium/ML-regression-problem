@@ -6,7 +6,6 @@ from torch.utils.data import Dataset, DataLoader
 
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -30,10 +29,20 @@ SEMANTIC_MISSING_COLUMNS = [
 
 class HousePricesDataset(Dataset):
     def __init__(self, X, y=None):
-        self.X = torch.tensor(X, dtype=torch.float32)
+        X = np.ascontiguousarray(
+            X,
+            dtype=np.float32,
+        )
+
+        self.X = torch.from_numpy(X)
 
         if y is not None:
-            self.y = torch.tensor(np.asarray(y), dtype=torch.float32)
+            y = np.ascontiguousarray(
+                np.asarray(y),
+                dtype=np.float32,
+            )
+
+            self.y = torch.from_numpy(y)
         else:
             self.y = None
 
@@ -108,7 +117,7 @@ def create_preprocessor(X_train):
     return preprocessor
 
 
-def create_dataloaders(config):
+def load_data(config):
     train_df = pd.read_csv(config.paths.train_data)
     test_df = pd.read_csv(config.paths.test_data)
 
@@ -122,72 +131,48 @@ def create_dataloaders(config):
     id_column = config.data.id_column
 
     X = train_df.drop(columns=[target, id_column])
-    y = train_df[target]
+    y = train_df[target].copy()
 
     test_ids = test_df[id_column].copy()
     X_test = test_df.drop(columns=[id_column])
 
-    X_train, X_val, y_train, y_val = train_test_split(
-        X,
-        y,
-        test_size=config.data.validation_size,
-        random_state=config.general.seed
-    )
-
     if config.data.target_transform == "log1p":
-        y_train = np.log1p(y_train)
-        y_val = np.log1p(y_val)
+        y = np.log1p(y)
+
+    return X, y, X_test, test_ids
+
+
+def create_fold_dataloaders(X, y, X_test, train_idx, val_idx, config):
+    X_train = X.iloc[train_idx].copy()
+    X_val = X.iloc[val_idx].copy()
+
+    y_train = y.iloc[train_idx].copy()
+    y_val = y.iloc[val_idx].copy()
+
+    if config.data.standardize_target:
+        target_mean = float(y_train.mean())
+        target_std = float(y_train.std(ddof=0))
+
+        y_train = (y_train - target_mean) / target_std
+        y_val = (y_val - target_mean) / target_std
+    else:
+        target_mean = 0.0
+        target_std = 1.0
 
     preprocessor = create_preprocessor(X_train)
 
     X_train = preprocessor.fit_transform(X_train)
     X_val = preprocessor.transform(X_val)
-    X_test = preprocessor.transform(X_test)
+    X_test_fold = preprocessor.transform(X_test)
 
-    train_dataset = HousePricesDataset(
-        X_train,
-        y_train
-    )
+    train_dataset = HousePricesDataset(X_train, y_train)
+    val_dataset = HousePricesDataset(X_val, y_val)
+    test_dataset = HousePricesDataset(X_test_fold)
 
-    val_dataset = HousePricesDataset(
-        X_val,
-        y_val
-    )
-
-    test_dataset = HousePricesDataset(
-        X_test,
-    )
-
-    # Перемешиваем данные только на трейне, чтобы модель не запомнила последовательность объектов
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config.training.batch_size,
-        shuffle=True,
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config.training.batch_size,
-        shuffle=False,
-    )
-
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=config.training.batch_size,
-        shuffle=False,
-    )
+    train_loader = DataLoader(train_dataset, batch_size=config.training.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size = config.training.batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size = config.training.batch_size, shuffle=False)
 
     input_size = X_train.shape[1]
 
-    return (
-        train_loader,
-        val_loader,
-        test_loader,
-        preprocessor,
-        test_ids,
-        input_size,
-    )
-
-
-
-
+    return train_loader, val_loader, test_loader, preprocessor, input_size, target_mean, target_std

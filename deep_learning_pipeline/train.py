@@ -1,12 +1,10 @@
-from pathlib import Path
 import copy
 
+import numpy as np
 import torch
 
-from deep_learning_pipeline.utils import save_checkpoint
 
-
-def validate(model, val_loader, loss_func, metric_func, device):
+def validate(model, val_loader, loss_func, metric_func, device, target_mean=0.0, target_std=1.0):
     model.eval()
 
     total_loss = 0.0
@@ -36,12 +34,15 @@ def validate(model, val_loader, loss_func, metric_func, device):
         all_predictions = torch.cat(all_predictions)
         all_targets = torch.cat(all_targets)
 
-        val_metric = metric_func(all_predictions, all_targets).item()
+        metric_predictions = all_predictions * target_std + target_mean
+        metric_targets = all_targets * target_std + target_mean
+
+        val_metric = metric_func(metric_predictions, metric_targets).item()
 
     return val_loss, val_metric
 
 
-def train(model, train_loader, val_loader, loss_func, metric_func, optimizer, scheduler, device, config):
+def train(model, train_loader, val_loader, loss_func, metric_func, optimizer, scheduler, device, config, target_mean=0.0, target_std=1.0):
     best_val_loss = float("inf")
     epochs_without_improvement = 0
     best_model_state = None
@@ -52,11 +53,6 @@ def train(model, train_loader, val_loader, loss_func, metric_func, optimizer, sc
         "val_metric": [],
         "learning_rate": [],
     }
-
-    checkpoint_path = (
-        Path(config.paths.checkpoints)
-        / f"{config.general.experiment_name}_best.pt"
-    )
 
     for epoch in range(1, config.training.epochs +1):
         model.train()
@@ -87,6 +83,8 @@ def train(model, train_loader, val_loader, loss_func, metric_func, optimizer, sc
             loss_func=loss_func,
             metric_func=metric_func,
             device=device,
+            target_mean=target_mean,
+            target_std=target_std,
         )
 
         scheduler.step(val_loss)
@@ -112,14 +110,6 @@ def train(model, train_loader, val_loader, loss_func, metric_func, optimizer, sc
 
             best_model_state = copy.deepcopy(model.state_dict())
 
-            save_checkpoint(
-                model=model,
-                optimizer=optimizer,
-                epoch=epoch,
-                val_loss=val_loss,
-                path=checkpoint_path,
-            )
-
         else:
             epochs_without_improvement +=1
 
@@ -133,3 +123,25 @@ def train(model, train_loader, val_loader, loss_func, metric_func, optimizer, sc
         model.load_state_dict(best_model_state)
 
     return history
+
+
+def predict(model, data_loader, device, target_mean=0.0, target_std=1.0):
+    model.eval()
+
+    all_predictions = []
+
+    with torch.inference_mode():
+        for batch in data_loader:
+            if isinstance(batch, (tuple, list)):
+                X = batch[0]
+            else:
+                X = batch
+
+            X = X.to(device)
+
+            predictions = model(X)
+            predictions = predictions * target_std + target_mean
+
+            all_predictions.append(predictions.cpu().numpy())
+
+    return np.concatenate(all_predictions)

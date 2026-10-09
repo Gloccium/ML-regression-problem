@@ -1,7 +1,12 @@
+import numpy as np
+import torch
+
+from sklearn.model_selection import KFold
+
 from deep_learning_pipeline.config import config
-from deep_learning_pipeline.data import create_dataloaders
+from deep_learning_pipeline.data import load_data, create_fold_dataloaders
 from deep_learning_pipeline.model import MLPRegressor
-from deep_learning_pipeline.train import train
+from deep_learning_pipeline.train import train, validate, predict
 from deep_learning_pipeline.utils import (
     set_seed,
     get_device,
@@ -9,56 +14,171 @@ from deep_learning_pipeline.utils import (
     get_metric,
     get_optimizer,
     get_scheduler,
-    log_experiment
+    log_experiment,
+    save_fold_artifacts,
+    create_submission,
 )
 
 
 def fit(config):
-    set_seed(config.general.seed)
     device = get_device(config)
 
-    train_loader, val_loader, test_loader, preprocessor, test_ids, input_size = create_dataloaders(config)
+    X, y, X_test, test_ids = load_data(config)
 
-    model = MLPRegressor(
-        input_size=input_size,
-        hidden_dims=config.model.hidden_dims,
-        dropout=config.model.dropout,
-    ).to(device)
+    loss_func = get_loss(config)
+    metric_func = get_metric(config)
 
-    loss = get_loss(config)
-    metric = get_metric(config)
-    optimizer = get_optimizer(model, config)
-    scheduler = get_scheduler(optimizer, config)
-
-    log_experiment(
-        config=config,
-        device=device,
-        input_size=input_size,
-        loss_func=loss,
-        optimizer=optimizer,
-        scheduler=scheduler,
+    kfold = KFold(
+        n_splits=config.data.n_splits,
+        shuffle=True,
+        random_state=config.general.seed
     )
 
-    # Тренировка модели
-    history = train(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        loss_func=loss,
-        metric_func=metric,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        device=device,
-        config=config,
-    )
+    fold_models = []
+    fold_histories = []
+    fold_preprocessors = []
+    fold_metrics = []
 
-    return (
-        model,
-        history,
-        test_loader,
-        test_ids,
-        preprocessor,
-    )
+    oof_predictions = np.zeros(len(X), dtype=np.float32)
+
+    test_predictions = []
+
+    for fold, (train_idx, val_idx) in enumerate(kfold.split(X), start=1):
+        print(f"Fold {fold}/{config.data.n_splits}")
+
+        set_seed(config.general.seed + fold - 1)
+
+        (
+            train_loader,
+            val_loader,
+            test_loader,
+            preprocessor,
+            input_size,
+            target_mean,
+            target_std,
+        ) = create_fold_dataloaders(
+            X=X,
+            y=y,
+            X_test=X_test,
+            train_idx=train_idx,
+            val_idx=val_idx,
+            config=config,
+        )
+
+        model = MLPRegressor(input_size=input_size,
+                             hidden_dims=config.model.hidden_dims,
+                             dropout=config.model.dropout,).to(device)
+        optimizer = get_optimizer(model, config)
+        scheduler = get_scheduler(optimizer, config)
+
+        log_experiment(config=config,
+                       device=device,
+                       input_size=input_size,
+                       loss_func=loss_func,
+                       optimizer=optimizer,
+                       scheduler=scheduler)
+
+        history = train(model=model,
+                        train_loader=train_loader,
+                        val_loader=val_loader,
+                        loss_func=loss_func,
+                        metric_func=metric_func,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                        device=device,
+                        config=config,
+                        target_mean=target_mean,
+                        target_std=target_std,
+                        )
+
+        save_fold_artifacts(
+            model=model,
+            preprocessor=preprocessor,
+            target_mean=target_mean,
+            target_std=target_std,
+            input_size=input_size,
+            config=config,
+            fold=fold,
+        )
+
+        val_predictions = predict(
+            model=model,
+            data_loader=val_loader,
+            device=device,
+            target_mean=target_mean,
+            target_std=target_std,
+        )
+
+        oof_predictions[val_idx] = val_predictions
+
+        fold_test_predictions = predict(
+            model=model,
+            data_loader=test_loader,
+            device=device,
+            target_mean=target_mean,
+            target_std=target_std,
+        )
+
+        test_predictions.append(fold_test_predictions)
+
+        val_loss, val_metric = validate(
+            model=model,
+            val_loader=val_loader,
+            loss_func=loss_func,
+            metric_func=metric_func,
+            device=device,
+            target_mean=target_mean,
+            target_std=target_std,
+        )
+
+        print(f"Fold {fold} result | "
+              f"Val loss: {val_loss:.4f} | "
+              f"Val {config.training.metric.upper()}: {val_metric:.4f}")
+
+        fold_metrics.append(val_metric)
+        fold_histories.append(history)
+        fold_preprocessors.append(preprocessor)
+
+        fold_models.append(model.to("cpu"))
+
+    mean_metric = np.mean(fold_metrics)
+    std_metric = np.std(fold_metrics)
+
+    y_tensor = torch.tensor(np.asarray(y), dtype=torch.float32)
+    oof_tensor = torch.tensor(oof_predictions, dtype=torch.float32)
+
+    oof_metric = metric_func(oof_tensor, y_tensor).item()
+
+    test_predictions = np.stack(test_predictions)
+    ensemble_test_predictions = np.mean(test_predictions, axis=0)
+
+
+    print(f"{config.data.n_splits}-Fold "
+          f"{config.training.metric.upper()}: {mean_metric:.4f} ± {std_metric:.4f}")
+
+    print(f"OOF {config.training.metric.upper()}: {oof_metric:.4f}")
+
+    return {
+        "models": fold_models,
+        "histories": fold_histories,
+        "preprocessors": fold_preprocessors,
+        "fold_metrics": fold_metrics,
+
+        "cv_mean": mean_metric,
+        "cv_std": std_metric,
+        "oof_metric": oof_metric,
+        "oof_predictions": oof_predictions,
+
+        "test_predictions": ensemble_test_predictions,
+        "test_ids": test_ids,
+    }
+
 
 if __name__ == "__main__":
-    model, history, test_loader, test_ids, preprocessor = fit(config)
+    results = fit(config)
+
+    submission_path = create_submission(
+        test_ids=results["test_ids"],
+        test_predictions=results["test_predictions"],
+        config=config,
+    )

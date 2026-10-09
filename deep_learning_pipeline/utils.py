@@ -1,8 +1,12 @@
 import os
 import random
+import joblib
 from pathlib import Path
+from omegaconf import OmegaConf
 
 import numpy as np
+import pandas as pd
+
 import torch
 import torch.nn as nn
 
@@ -14,9 +18,6 @@ def set_seed(seed):
     np.random.seed(seed)
 
     torch.manual_seed(seed)
-
-    if torch.backends.mps.is_available():
-        torch.mps.manual_seed(seed)
 
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
@@ -122,6 +123,48 @@ def save_checkpoint(model, optimizer, epoch, val_loss, path):
     torch.save(checkpoint, path)
 
 
+def save_fold_artifacts(model, preprocessor, target_mean, target_std, input_size, config, fold):
+    experiment_dir = (
+        Path(config.paths.checkpoints)
+        / config.general.experiment_name
+    )
+
+    fold_dir = experiment_dir / f"fold_{fold}"
+
+    fold_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    model_state_dict = {
+        key: value.detach().cpu()
+        for key, value in model.state_dict().items()
+    }
+
+    torch.save(
+        {
+            "model_state_dict": model_state_dict,
+            "input_size": input_size,
+            "hidden_dims": list(config.model.hidden_dims),
+            "dropout": float(config.model.dropout),
+            "target_mean": float(target_mean),
+            "target_std": float(target_std),
+            "target_transform": config.data.target_transform,
+        },
+        fold_dir / "model.pt",
+    )
+
+    joblib.dump(
+        preprocessor,
+        fold_dir / "preprocessor.joblib",
+    )
+
+    OmegaConf.save(
+        config=config,
+        f=experiment_dir / "config.yaml",
+    )
+
+
 def log_experiment(config, device, input_size, loss_func, optimizer, scheduler):
     print(f"Experiment: {config.general.experiment_name}")
     print(f"Device: {device}")
@@ -133,3 +176,29 @@ def log_experiment(config, device, input_size, loss_func, optimizer, scheduler):
     print(f"Optimizer: {optimizer.__class__.__name__}")
     print(f"Scheduler: {scheduler.__class__.__name__}")
     print()
+
+
+def create_submission(test_ids, test_predictions, config):
+    submission_dir = Path(config.paths.submissions)
+    submission_dir.mkdir(parents=True, exist_ok=True)
+
+    sale_prices = np.expm1(test_predictions)
+
+    submission = pd.DataFrame({
+        config.data.id_column: test_ids.to_numpy(),
+        config.data.target: sale_prices,
+    })
+
+    submission_path = (
+            submission_dir
+            / f"{config.general.experiment_name}.csv"
+    )
+
+    submission.to_csv(
+        submission_path,
+        index=False,
+    )
+
+    print(f"Submission saved to: {submission_path}")
+
+    return submission_path
