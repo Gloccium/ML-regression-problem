@@ -117,15 +117,13 @@ def create_preprocessor(X_train):
     return preprocessor
 
 
-def load_data(config):
+def load_train_data(config):
     train_df = pd.read_csv(config.paths.train_data)
-    test_df = pd.read_csv(config.paths.test_data)
 
     if config.data.drop_outliers:
         train_df = drop_outliers(train_df)
 
     train_df = fill_semantic_missing_columns(train_df)
-    test_df = fill_semantic_missing_columns(test_df)
 
     target = config.data.target
     id_column = config.data.id_column
@@ -133,16 +131,13 @@ def load_data(config):
     X = train_df.drop(columns=[target, id_column])
     y = train_df[target].copy()
 
-    test_ids = test_df[id_column].copy()
-    X_test = test_df.drop(columns=[id_column])
-
     if config.data.target_transform == "log1p":
         y = np.log1p(y)
 
-    return X, y, X_test, test_ids
+    return X, y
 
 
-def create_fold_dataloaders(X, y, X_test, train_idx, val_idx, config):
+def create_fold_dataloaders(X, y, train_idx, val_idx, config):
     X_train = X.iloc[train_idx].copy()
     X_val = X.iloc[val_idx].copy()
 
@@ -163,16 +158,37 @@ def create_fold_dataloaders(X, y, X_test, train_idx, val_idx, config):
 
     X_train = preprocessor.fit_transform(X_train)
     X_val = preprocessor.transform(X_val)
-    X_test_fold = preprocessor.transform(X_test)
 
     train_dataset = HousePricesDataset(X_train, y_train)
     val_dataset = HousePricesDataset(X_val, y_val)
-    test_dataset = HousePricesDataset(X_test_fold)
 
     train_loader = DataLoader(train_dataset, batch_size=config.training.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size = config.training.batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size = config.training.batch_size, shuffle=False)
 
     input_size = X_train.shape[1]
 
-    return train_loader, val_loader, test_loader, preprocessor, input_size, target_mean, target_std
+    return train_loader, val_loader, preprocessor, input_size, target_mean, target_std
+
+
+def load_test_data(config):
+    test_df = pd.read_csv(config.paths.test_data)
+
+    test_df = fill_semantic_missing_columns(test_df)
+
+    id_column = config.data.id_column
+
+    test_ids = test_df[id_column].copy()
+    X_test = test_df.drop(columns=[id_column])
+
+    return X_test, test_ids
+
+
+def create_inference_loader(X, preprocessor, batch_size):
+    X = preprocessor.transform(X)
+    dataset = HousePricesDataset(X)
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+    )

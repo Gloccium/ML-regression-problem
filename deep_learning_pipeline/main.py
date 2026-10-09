@@ -4,9 +4,10 @@ import torch
 from sklearn.model_selection import KFold
 
 from deep_learning_pipeline.config import config
-from deep_learning_pipeline.data import load_data, create_fold_dataloaders
+from deep_learning_pipeline.data import load_train_data, create_fold_dataloaders
 from deep_learning_pipeline.model import MLPRegressor
-from deep_learning_pipeline.train import train, validate, predict
+from deep_learning_pipeline.train import train, validate
+from deep_learning_pipeline.predict import predict
 from deep_learning_pipeline.utils import (
     set_seed,
     get_device,
@@ -23,7 +24,7 @@ from deep_learning_pipeline.utils import (
 def fit(config):
     device = get_device(config)
 
-    X, y, X_test, test_ids = load_data(config)
+    X, y, X_test, test_ids = load_train_data(config)
 
     loss_func = get_loss(config)
     metric_func = get_metric(config)
@@ -59,7 +60,6 @@ def fit(config):
         ) = create_fold_dataloaders(
             X=X,
             y=y,
-            X_test=X_test,
             train_idx=train_idx,
             val_idx=val_idx,
             config=config,
@@ -111,16 +111,6 @@ def fit(config):
 
         oof_predictions[val_idx] = val_predictions
 
-        fold_test_predictions = predict(
-            model=model,
-            data_loader=test_loader,
-            device=device,
-            target_mean=target_mean,
-            target_std=target_std,
-        )
-
-        test_predictions.append(fold_test_predictions)
-
         val_loss, val_metric = validate(
             model=model,
             val_loader=val_loader,
@@ -168,9 +158,6 @@ def fit(config):
         "cv_std": std_metric,
         "oof_metric": oof_metric,
         "oof_predictions": oof_predictions,
-
-        "test_predictions": ensemble_test_predictions,
-        "test_ids": test_ids,
     }
 
 
