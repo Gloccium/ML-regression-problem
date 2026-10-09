@@ -1,0 +1,16 @@
+name: house-prices-ml
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.14
+  - pip
+
+  - pip:
+      - numpy
+      - pandas
+      - scikit-learn
+      - torch
+      - omegaconf
+      - joblib
