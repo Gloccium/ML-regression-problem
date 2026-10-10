@@ -2,48 +2,42 @@
 
 Reproducible machine learning pipeline for the Kaggle **House Prices - Advanced Regression Techniques** competition.
 
-The project contains two separate approaches:
+The project compares two approaches:
 
-- `deep_learning_pipeline/` — PyTorch MLP pipeline
-- `classic_pipeline/` — classic ML pipeline
+- `deep_learning_pipeline/` — PyTorch MLP
+- `classic_pipeline/` — Ridge, Random Forest and XGBoost
 
-## Deep Learning Pipeline
+Both pipelines use the same core data preparation decisions, 5-fold cross-validation and OOF evaluation. Saved artifacts can be loaded later for inference without retraining.
 
-The current deep learning solution uses a fully connected neural network with 5-fold cross-validation.
+## Results
 
-### Pipeline
+| Model | 5-Fold CV RMSE | OOF RMSE | Kaggle Public RMSE |
+|---|---:|---:|---:|
+| Ridge | 0.1150 ± 0.0082 | 0.1153 | 0.13367 |
+| Random Forest | 0.1390 ± 0.0092 | 0.1393 | — |
+| XGBoost | 0.1150 ± 0.0073 | 0.1152 | 0.12992 |
+| MLP | 0.1189 ± 0.0080 | 0.1192 | 0.13091 |
+| **Ridge + XGBoost 50/50 blend** | — | **0.1097** | **0.12741** |
 
-- EDA and outlier analysis
-- semantic missing-value handling
-- median imputation for numerical features
-- most-frequent imputation for categorical features
-- numerical feature standardization
-- one-hot encoding
-- `log1p(SalePrice)` target transformation
-- fold-specific target standardization
-- MLP: `301 → 256 → 128 → 64 → 1`
-- BatchNorm + ReLU + Dropout
-- AdamW optimizer
-- ReduceLROnPlateau scheduler
-- early stopping
-- 5-fold cross-validation
-- OOF evaluation
-- 5-model ensemble for Kaggle test predictions
-- saved preprocessing and model artifacts for reproducible inference
+The best final solution is the **50/50 Ridge + XGBoost ensemble**.
 
-### Results
-
-```text
-5-Fold CV RMSE: 0.1189 ± 0.0080
-OOF RMSE:       0.1192
-Kaggle Public:  0.13091
-```
+---
 
 ## Project Structure
 
 ```text
 ML-regression-problem/
 ├── classic_pipeline/
+│   ├── __init__.py
+│   ├── blend.py
+│   ├── config.py
+│   ├── data.py
+│   ├── inference.py
+│   ├── main.py
+│   ├── models.py
+│   ├── train.py
+│   └── utils.py
+│
 ├── deep_learning_pipeline/
 │   ├── __init__.py
 │   ├── config.py
@@ -69,19 +63,37 @@ ML-regression-problem/
 └── README.md
 ```
 
-`data/`, `checkpoints/` and `submissions/` are generated/local directories and are not stored in Git.
+`data/`, `checkpoints/` and `submissions/` are local/generated directories and are not stored in Git.
 
 ---
 
-## Reproduce Training
+## Data Preparation
 
-### Requirements
+The main preprocessing decisions are shared between the deep learning and classical pipelines:
 
-You only need:
+- EDA and outlier analysis
+- removal of two anomalous observations with very large `GrLivArea` and unusually low `SalePrice`
+- semantic missing values such as missing garage/basement/pool features filled with `"None"`
+- median imputation for numerical features
+- most-frequent imputation for remaining categorical features
+- one-hot encoding for categorical features
+- numerical feature standardization
+- `log1p(SalePrice)` target transformation
+- leakage-safe preprocessing fitted separately inside every CV fold
+
+The MLP additionally uses fold-specific target standardization.
+
+---
+
+# Setup
+
+## Requirements
+
+You need:
 
 - Git
 - Miniconda or Anaconda
-- House Prices dataset
+- the Kaggle House Prices dataset
 
 Clone the repository:
 
@@ -90,7 +102,7 @@ git clone https://github.com/Gloccium/ML-regression-problem.git
 cd ML-regression-problem
 ```
 
-Download the Kaggle **House Prices - Advanced Regression Techniques** dataset and place the files in:
+Place the dataset files in:
 
 ```text
 data/
@@ -98,128 +110,27 @@ data/
 └── test.csv
 ```
 
-Then run:
-
-```bash
-chmod +x train.sh
-./train.sh
-```
-
-The script automatically:
-
-1. checks that Conda is installed;
-2. creates the `house-prices-ml` environment if it does not exist;
-3. installs all required Python dependencies;
-4. checks that the dataset is available;
-5. runs the complete 5-fold cross-validation training pipeline;
-6. saves the best model and preprocessing artifacts for every fold.
-
-No manually created Python environment is required.
-
-### Training Output
-
-The trained artifacts are saved to:
-
-```text
-checkpoints/<experiment_name>/
-```
-
-For the current baseline:
-
-```text
-checkpoints/mlp_baseline/
-├── config.yaml
-├── fold_1/
-│   ├── model.pt
-│   └── preprocessor.joblib
-├── fold_2/
-│   ├── model.pt
-│   └── preprocessor.joblib
-├── fold_3/
-│   ├── model.pt
-│   └── preprocessor.joblib
-├── fold_4/
-│   ├── model.pt
-│   └── preprocessor.joblib
-└── fold_5/
-    ├── model.pt
-    └── preprocessor.joblib
-```
-
-Each fold contains:
-
-- trained PyTorch model weights;
-- fitted preprocessing pipeline;
-- target normalization statistics;
-- model architecture parameters.
-
-The experiment config is also saved alongside the folds.
-
----
-
-## Reproduce Inference
-
-Inference can be run later **without retraining the models**.
-
-First create the environment if it does not already exist:
+Create the environment:
 
 ```bash
 conda env create -f environment.yml
 ```
 
-Then run:
-
-```bash
-conda run -n house-prices-ml \
-  python -m deep_learning_pipeline.inference \
-  --experiment mlp_baseline
-```
-
-The inference pipeline:
-
-1. loads `test.csv`;
-2. loads all five fitted preprocessors;
-3. loads all five trained PyTorch models;
-4. restores fold-specific target normalization;
-5. generates predictions from every fold;
-6. averages the five predictions in log-space;
-7. converts them back to `SalePrice`;
-8. creates a Kaggle-compatible CSV file.
-
-The generated file is saved to:
+The environment is named:
 
 ```text
-submissions/mlp_baseline_inference.csv
+house-prices-ml
 ```
 
-The inference generated exclusively from saved artifacts reproduces the original Kaggle score:
-
-```text
-Kaggle Public Score: 0.13091
-```
+Commands below use `conda run`, so manually activating the environment is not required.
 
 ---
 
-## Run Training Manually
-
-Instead of using `train.sh`, the environment can also be created manually:
-
-```bash
-conda env create -f environment.yml
-```
-
-Then run training with:
-
-```bash
-conda run -n house-prices-ml \
-  python -m deep_learning_pipeline.main
-```
-
----
+# Deep Learning Pipeline
 
 ## Model
 
-The current baseline architecture is:
+The PyTorch baseline is a fully connected neural network:
 
 ```text
 Input
@@ -244,7 +155,7 @@ Linear(64 → 1)
 
 The actual input dimension is determined automatically by the fitted preprocessing pipeline.
 
-Current configuration:
+Main configuration:
 
 ```text
 Hidden layers: [256, 128, 64]
@@ -256,17 +167,303 @@ Metric:        RMSE
 CV:            5 folds
 ```
 
-## Notes
+Training includes:
 
-The neural network is intentionally kept relatively simple.
+- 5-fold cross-validation
+- fold-specific preprocessing
+- fold-specific target standardization
+- AdamW optimization
+- ReduceLROnPlateau scheduling
+- early stopping
+- OOF evaluation
+- best-model restoration
+- saved preprocessing and model artifacts for every fold
 
-The goal of the project is not only to obtain a good Kaggle score, but to build a clean and reproducible end-to-end machine learning pipeline with:
+## Train the MLP
 
-- leakage-safe preprocessing;
-- cross-validation;
-- OOF evaluation;
-- model ensembling;
-- saved model artifacts;
-- independent inference from saved weights.
+The simplest option is:
 
-The `classic_pipeline/` implementation will be used to compare the neural network against classical tabular machine learning approaches.
+```bash
+chmod +x train.sh
+./train.sh
+```
+
+`train.sh`:
+
+1. checks that Conda is installed;
+2. creates the `house-prices-ml` environment if it does not exist;
+3. checks that the dataset is available;
+4. runs the complete MLP training pipeline;
+5. saves the trained fold artifacts.
+
+The same training can be launched manually with:
+
+```bash
+conda run -n house-prices-ml \
+  python -m deep_learning_pipeline.main
+```
+
+Artifacts are saved to:
+
+```text
+checkpoints/mlp_baseline/
+├── config.yaml
+├── fold_1/
+│   ├── model.pt
+│   └── preprocessor.joblib
+├── fold_2/
+│   ├── model.pt
+│   └── preprocessor.joblib
+├── fold_3/
+│   ├── model.pt
+│   └── preprocessor.joblib
+├── fold_4/
+│   ├── model.pt
+│   └── preprocessor.joblib
+└── fold_5/
+    ├── model.pt
+    └── preprocessor.joblib
+```
+
+Each fold stores the trained PyTorch weights together with the preprocessing and target-normalization information required for reproducible inference.
+
+## MLP Inference
+
+Inference can be reproduced later without retraining:
+
+```bash
+conda run -n house-prices-ml \
+  python -m deep_learning_pipeline.inference \
+  --experiment mlp_baseline
+```
+
+The inference pipeline:
+
+1. loads `test.csv`;
+2. loads all five saved preprocessors;
+3. loads all five trained MLPs;
+4. restores fold-specific target normalization;
+5. generates predictions from all folds;
+6. averages predictions in `log1p(SalePrice)` space;
+7. applies `expm1`;
+8. creates a Kaggle-compatible CSV.
+
+Output:
+
+```text
+submissions/mlp_baseline_inference.csv
+```
+
+Reproducing inference exclusively from saved artifacts gives the same Kaggle Public score as the original training run:
+
+```text
+0.13091
+```
+
+---
+
+# Classic ML Pipeline
+
+The classical pipeline uses the same 5 folds and comparable preprocessing to evaluate three different model families:
+
+- **Ridge** — regularized linear regression
+- **Random Forest** — bagging ensemble of decision trees
+- **XGBoost** — gradient boosting on decision trees
+
+For every fold, preprocessing and the fitted estimator are stored together as a single sklearn `Pipeline`.
+
+Example:
+
+```text
+checkpoints/classic/classic_baselines/
+├── config.yaml
+├── ridge/
+│   ├── fold_1.joblib
+│   ├── fold_2.joblib
+│   ├── fold_3.joblib
+│   ├── fold_4.joblib
+│   └── fold_5.joblib
+├── random_forest/
+│   └── ...
+└── xgboost/
+    └── ...
+```
+
+Each `.joblib` file contains both:
+
+```text
+fitted preprocessing
++
+trained model
+```
+
+## Train Ridge
+
+```bash
+conda run -n house-prices-ml \
+  python -m classic_pipeline.main \
+  --model ridge
+```
+
+Result:
+
+```text
+5-Fold RMSE: 0.1150 ± 0.0082
+OOF RMSE:    0.1153
+```
+
+## Train Random Forest
+
+```bash
+conda run -n house-prices-ml \
+  python -m classic_pipeline.main \
+  --model random_forest
+```
+
+Result:
+
+```text
+5-Fold RMSE: 0.1390 ± 0.0092
+OOF RMSE:    0.1393
+```
+
+## Train XGBoost
+
+```bash
+conda run -n house-prices-ml \
+  python -m classic_pipeline.main \
+  --model xgboost
+```
+
+Result:
+
+```text
+5-Fold RMSE: 0.1150 ± 0.0073
+OOF RMSE:    0.1152
+```
+
+---
+
+## Classic Model Inference
+
+Inference loads the already fitted fold pipelines and produces an ensemble prediction over the Kaggle test set.
+
+### Ridge
+
+```bash
+conda run -n house-prices-ml \
+  python -m classic_pipeline.inference \
+  --experiment classic_baselines \
+  --model ridge
+```
+
+Output:
+
+```text
+submissions/classic/classic_baselines_ridge.csv
+```
+
+### Random Forest
+
+```bash
+conda run -n house-prices-ml \
+  python -m classic_pipeline.inference \
+  --experiment classic_baselines \
+  --model random_forest
+```
+
+Output:
+
+```text
+submissions/classic/classic_baselines_random_forest.csv
+```
+
+### XGBoost
+
+```bash
+conda run -n house-prices-ml \
+  python -m classic_pipeline.inference \
+  --experiment classic_baselines \
+  --model xgboost
+```
+
+Output:
+
+```text
+submissions/classic/classic_baselines_xgboost.csv
+```
+
+Inference does **not** retrain the models and does **not** upload anything to Kaggle. It only loads saved artifacts, calculates predictions and writes a local CSV file.
+
+---
+
+# Ridge + XGBoost Blend
+
+Ridge and XGBoost achieved almost identical OOF scores while representing very different model families.
+
+Their prediction errors are therefore partially complementary.
+
+The final solution averages their predictions in `log1p(SalePrice)` space:
+
+```text
+50% Ridge
++
+50% XGBoost
+=
+final prediction
+```
+
+Run the blend with:
+
+```bash
+conda run -n house-prices-ml \
+  python -m classic_pipeline.blend
+```
+
+The script:
+
+1. loads the saved Ridge fold pipelines;
+2. loads the saved XGBoost fold pipelines;
+3. reconstructs OOF predictions;
+4. evaluates the 50/50 OOF blend;
+5. performs inference on `test.csv`;
+6. averages Ridge and XGBoost predictions in log-space;
+7. applies `expm1`;
+8. creates the final submission CSV.
+
+Result:
+
+```text
+Blend OOF RMSE: 0.1097
+```
+
+Output:
+
+```text
+submissions/classic/blend_ridge_xgboost_0.50.csv
+```
+
+Kaggle Public RMSE:
+
+```text
+0.12741
+```
+
+This was the best result among all tested approaches.
+
+---
+
+# Kaggle Results
+
+Final leaderboard comparison:
+
+| Model | Kaggle Public RMSE |
+|---|---:|
+| Ridge | 0.13367 |
+| MLP | 0.13091 |
+| XGBoost | 0.12992 |
+| **Ridge + XGBoost 50/50** | **0.12741** |
+
+The Random Forest model was kept as a local baseline and was not submitted because its OOF score was substantially worse.
+
+---
