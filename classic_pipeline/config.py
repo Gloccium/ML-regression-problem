@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 config = OmegaConf.create({
     "general": {
-        "experiment_name": "xgboost_tuned_2",
+        "experiment_name": "classic_baselines",
         "seed": 42
     },
 
@@ -38,13 +38,11 @@ config = OmegaConf.create({
         },
 
         "xgboost": {
-            "n_estimators": 1200,
-            "learning_rate": 0.025,
+            "n_estimators": 1000,
+            "learning_rate": 0.03,
             "max_depth": 3,
             "subsample": 0.8,
             "colsample_bytree": 0.8,
-            "min_child_weight": 3,
-            "reg_lambda": 2.0,
         },
     },
 })

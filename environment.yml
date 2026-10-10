@@ -6,12 +6,13 @@ channels:
 dependencies:
   - python=3.14
   - pip
+  - llvm-openmp
 
   - pip:
-      - numpy
-      - pandas
-      - scikit-learn
-      - torch
-      - omegaconf
-      - joblib
-      - xgboost
+      - numpy==2.5.3
+      - pandas==3.0.6
+      - scikit-learn==1.9.1
+      - torch==2.14.1
+      - omegaconf==2.4.0
+      - joblib==1.6.0
+      - xgboost==3.4.1

@@ -1,6 +1,5 @@
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
-from xgboost import XGBRegressor
 
 
 def get_model(model_name, config):
@@ -22,6 +21,8 @@ def get_model(model_name, config):
         )
 
     if model_name == "xgboost":
+        from xgboost import XGBRegressor
+
         params = config.models.xgboost
 
         return XGBRegressor(
@@ -30,8 +31,6 @@ def get_model(model_name, config):
             max_depth=params.max_depth,
             subsample=params.subsample,
             colsample_bytree=params.colsample_bytree,
-            min_child_weight=params.min_child_weight,
-            reg_lambda=params.reg_lambda,
             objective="reg:squarederror",
             random_state=seed,
             n_jobs=-1

@@ -23,6 +23,66 @@ The best final solution is the **50/50 Ridge + XGBoost ensemble**.
 
 ---
 
+## Quick Start — Reproduce Best Model
+
+The best solution in this project is a **50/50 ensemble of Ridge and XGBoost**.
+
+### Requirements
+
+- Git
+- Miniconda or Anaconda
+- Kaggle House Prices dataset
+
+Clone the repository:
+
+```bash
+git clone https://github.com/Gloccium/ML-regression-problem.git
+cd ML-regression-problem
+```
+
+Place the dataset files in:
+
+```text
+data/
+├── train.csv
+└── test.csv
+```
+
+Then run:
+
+```bash
+chmod +x run_best.sh
+./run_best.sh
+```
+
+The script automatically:
+
+1. checks that Conda is installed;
+2. creates the `house-prices-ml` environment if necessary;
+3. trains Ridge using 5-fold cross-validation;
+4. trains XGBoost using the same 5 folds;
+5. saves all fitted fold pipelines;
+6. creates a 50/50 Ridge + XGBoost ensemble;
+7. evaluates the ensemble using OOF predictions;
+8. generates the final test predictions.
+
+Expected result:
+
+```text
+Ridge OOF RMSE:          ~0.1153
+XGBoost OOF RMSE:        ~0.1152
+Ridge + XGBoost OOF:     ~0.1097
+Kaggle Public RMSE:       0.12741
+```
+
+The final prediction file is saved to:
+
+```text
+submissions/classic/blend_ridge_xgboost_0.50.csv
+```
+
+The script does not submit anything to Kaggle.
+
 ## Project Structure
 
 ```text
@@ -59,6 +119,7 @@ ML-regression-problem/
 ├── checkpoints/
 ├── submissions/
 ├── environment.yml
+├── run_best.sh
 ├── train.sh
 └── README.md
 ```
