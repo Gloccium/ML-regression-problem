@@ -17,14 +17,13 @@ from deep_learning_pipeline.utils import (
     get_scheduler,
     log_experiment,
     save_fold_artifacts,
-    create_submission,
 )
 
 
 def fit(config):
     device = get_device(config)
 
-    X, y, X_test, test_ids = load_train_data(config)
+    X, y = load_train_data(config)
 
     loss_func = get_loss(config)
     metric_func = get_metric(config)
@@ -32,27 +31,22 @@ def fit(config):
     kfold = KFold(
         n_splits=config.data.n_splits,
         shuffle=True,
-        random_state=config.general.seed
+        random_state=config.general.seed,
     )
 
-    fold_models = []
     fold_histories = []
-    fold_preprocessors = []
     fold_metrics = []
 
     oof_predictions = np.zeros(len(X), dtype=np.float32)
 
-    test_predictions = []
-
     for fold, (train_idx, val_idx) in enumerate(kfold.split(X), start=1):
-        print(f"Fold {fold}/{config.data.n_splits}")
+        print(f"\nFold {fold}/{config.data.n_splits}")
 
         set_seed(config.general.seed + fold - 1)
 
         (
             train_loader,
             val_loader,
-            test_loader,
             preprocessor,
             input_size,
             target_mean,
@@ -65,31 +59,37 @@ def fit(config):
             config=config,
         )
 
-        model = MLPRegressor(input_size=input_size,
-                             hidden_dims=config.model.hidden_dims,
-                             dropout=config.model.dropout,).to(device)
+        model = MLPRegressor(
+            input_size=input_size,
+            hidden_dims=config.model.hidden_dims,
+            dropout=config.model.dropout,
+        ).to(device)
+
         optimizer = get_optimizer(model, config)
         scheduler = get_scheduler(optimizer, config)
 
-        log_experiment(config=config,
-                       device=device,
-                       input_size=input_size,
-                       loss_func=loss_func,
-                       optimizer=optimizer,
-                       scheduler=scheduler)
+        log_experiment(
+            config=config,
+            device=device,
+            input_size=input_size,
+            loss_func=loss_func,
+            optimizer=optimizer,
+            scheduler=scheduler,
+        )
 
-        history = train(model=model,
-                        train_loader=train_loader,
-                        val_loader=val_loader,
-                        loss_func=loss_func,
-                        metric_func=metric_func,
-                        optimizer=optimizer,
-                        scheduler=scheduler,
-                        device=device,
-                        config=config,
-                        target_mean=target_mean,
-                        target_std=target_std,
-                        )
+        history = train(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            loss_func=loss_func,
+            metric_func=metric_func,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            device=device,
+            config=config,
+            target_mean=target_mean,
+            target_std=target_std,
+        )
 
         save_fold_artifacts(
             model=model,
@@ -121,41 +121,41 @@ def fit(config):
             target_std=target_std,
         )
 
-        print(f"Fold {fold} result | "
-              f"Val loss: {val_loss:.4f} | "
-              f"Val {config.training.metric.upper()}: {val_metric:.4f}")
+        print(
+            f"Fold {fold} result | "
+            f"Val loss: {val_loss:.4f} | "
+            f"Val {config.training.metric.upper()}: {val_metric:.4f}"
+        )
 
-        fold_metrics.append(val_metric)
         fold_histories.append(history)
-        fold_preprocessors.append(preprocessor)
+        fold_metrics.append(val_metric)
 
-        fold_models.append(model.to("cpu"))
+        model.to("cpu")
 
-    mean_metric = np.mean(fold_metrics)
-    std_metric = np.std(fold_metrics)
+    cv_mean = np.mean(fold_metrics)
+    cv_std = np.std(fold_metrics)
 
     y_tensor = torch.tensor(np.asarray(y), dtype=torch.float32)
     oof_tensor = torch.tensor(oof_predictions, dtype=torch.float32)
 
     oof_metric = metric_func(oof_tensor, y_tensor).item()
 
-    test_predictions = np.stack(test_predictions)
-    ensemble_test_predictions = np.mean(test_predictions, axis=0)
+    print(
+        f"\n{config.data.n_splits}-Fold "
+        f"{config.training.metric.upper()}: "
+        f"{cv_mean:.4f} ± {cv_std:.4f}"
+    )
 
-
-    print(f"{config.data.n_splits}-Fold "
-          f"{config.training.metric.upper()}: {mean_metric:.4f} ± {std_metric:.4f}")
-
-    print(f"OOF {config.training.metric.upper()}: {oof_metric:.4f}")
+    print(
+        f"OOF {config.training.metric.upper()}: "
+        f"{oof_metric:.4f}"
+    )
 
     return {
-        "models": fold_models,
         "histories": fold_histories,
-        "preprocessors": fold_preprocessors,
         "fold_metrics": fold_metrics,
-
-        "cv_mean": mean_metric,
-        "cv_std": std_metric,
+        "cv_mean": cv_mean,
+        "cv_std": cv_std,
         "oof_metric": oof_metric,
         "oof_predictions": oof_predictions,
     }
@@ -163,9 +163,3 @@ def fit(config):
 
 if __name__ == "__main__":
     results = fit(config)
-
-    submission_path = create_submission(
-        test_ids=results["test_ids"],
-        test_predictions=results["test_predictions"],
-        config=config,
-    )
